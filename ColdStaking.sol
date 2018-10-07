@@ -71,6 +71,11 @@ contract ColdStaking {
 
     //========== end testing values ===================*/
     
+    constructor() public {
+        Timestamp = now;
+        LastBlock = block.number;
+    }
+    
     mapping(address => Staker) public staker;
 
     function freeze(bool _f) public only_treasurer
@@ -107,24 +112,16 @@ contract ColdStaking {
     {
         if (block.number > LastBlock)   //run once per block.
         {
-            uint _LastBlock = LastBlock;
             LastBlock = block.number;
 
             StakingRewardPool = address(this).balance.sub(TotalStakingAmount + msg.value);   //fix rewards pool for this block.
             // msg.value here for case new_block() is calling from start_staking(), and msg.value will be added to CurrentBlockDeposits.
-
-            //The consensus protocol enforces block timestamps are always atleast +1 from their parent, so a node cannot "lie into the past". 
-            if (now > Timestamp) //But with this condition I feel safer :) May be removed.
-            {
-                uint _blocks = block.number - _LastBlock;
-                uint _seconds = now - Timestamp;
-                if (_seconds > _blocks * 25) //if time goes far in the future, then use new time as 25 second * blocks.
-                {
-                    _seconds = _blocks * 25;
-                }
-                TotalStakingWeight += _seconds.mul(TotalStakingAmount);
-                Timestamp += _seconds;
-            }
+            
+            
+            TotalStakingWeight += now.sub(Timestamp).mul(TotalStakingAmount);
+            // for the first call TotalStakingAmount will be zero so the weight will be zero.
+            
+            Timestamp = now;
         }
     }
 
