@@ -49,7 +49,7 @@ contract ColdStaking
     
     
     uint public staked_amount;
-    uint public rewardToDistribute;
+    uint public rewardToRedistribute;
     uint public weightedBlockReward;
     uint public totalClaimedReward;
     uint public lastTotalReward;
@@ -106,7 +106,7 @@ contract ColdStaking
         lastTotalReward = lastTotalReward + intervalReward;
         
         if (staked_amount!=0) weightedBlockReward = weightedBlockReward.add(intervalReward.mul(1 ether).div(staked_amount));
-        else rewardToDistribute = rewardToDistribute.add(intervalReward);
+        else rewardToRedistribute = rewardToRedistribute.add(intervalReward);
         
         if(_sign ) staked_amount = staked_amount.add(_value);
         else staked_amount = staked_amount.sub(_value);
@@ -179,7 +179,7 @@ contract ColdStaking
         uint _amount = staker[_addr].stake;
         
         staked_amount = staked_amount.sub(_amount);
-        rewardToDistribute = rewardToDistribute.add(_amount);
+        rewardToRedistribute = rewardToRedistribute.add(_amount);
 
         staker[_addr].stake = 0;
         _addr.transfer(_amount);
