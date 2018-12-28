@@ -44,15 +44,16 @@ contract ColdStaking {
     event Claim(address staker, uint reward);
     event DonationDeposited(address _address, uint value);
 
-
     struct Staker
     {
         uint amount;
         uint time;
     }
 
-    uint public LastBlock;
-    uint public Timestamp;          //timestamp of the last interaction with the contract.
+
+    uint public LastBlock = block.number;
+    uint public Timestamp = now;    //timestamp of the last interaction with the contract.
+
     uint public TotalStakingWeight; //total weight = sum (each_staking_amount * each_staking_time).
     uint public TotalStakingAmount; //currently frozen amount for Staking.
     uint public StakingRewardPool;  //available amount for paying rewards.
@@ -65,11 +66,11 @@ contract ColdStaking {
     uint public DateStartStaking = 1541980800;  // 12.11.2018 0:0:0 UTC.
 
 
-    /*========== TESTING VALUES ===========
-    uint public round_interval = 1 hours; // 1 hours.
-    uint public max_delay = 7 days; // 7 days.
-
-    //========== end testing values ===================*/
+    //========== TESTNET VALUES ===========
+    //uint public round_interval   = 10 minutes; 
+    //uint public max_delay        = 2 days;
+    //uint public DateStartStaking = 0;
+    //========== END TEST VALUES ==========
     
     mapping(address => Staker) public staker;
 
@@ -93,7 +94,6 @@ contract ColdStaking {
         Treasury = 0x00;
     }
 	
-
     function() public payable
     {
         // No donations accepted to fallback!
@@ -139,7 +139,6 @@ contract ColdStaking {
         staker[msg.sender].time = Timestamp;
         staker[msg.sender].amount = staker[msg.sender].amount.add(msg.value);
        
-
         emit StartStaking(
             msg.sender,
             msg.value,
@@ -148,11 +147,8 @@ contract ColdStaking {
         );
     }
 
-
     function DEBUG_donation() public payable {
-
         emit DonationDeposited(msg.sender, msg.value);
-
     }
 
     function withdraw_stake() public only_staker
@@ -162,10 +158,7 @@ contract ColdStaking {
 
         uint _amount = staker[msg.sender].amount;
         // claim reward if available.
-        if (Timestamp >= staker[msg.sender].time + round_interval)
-        { 
-            claim(); 
-        }
+        claim(); 
         TotalStakingAmount = TotalStakingAmount.sub(_amount);
         TotalStakingWeight = TotalStakingWeight.sub((Timestamp.sub(staker[msg.sender].time)).mul(staker[msg.sender].amount)); // remove from Weight.
         
@@ -190,10 +183,9 @@ contract ColdStaking {
             StakingRewardPool = StakingRewardPool.sub(_reward);
             TotalStakingWeight = TotalStakingWeight.sub(_StakerWeight); // remove paid Weight.
 
-            staker[msg.sender].time = staker[msg.sender].time.add(_CompleteRoundsInterval); // reset to paid time, staking continue wthout lose uncomplete ruonds.
-
+            staker[msg.sender].time = staker[msg.sender].time.add(_CompleteRoundsInterval); // reset to paid time, staking continue without a loss of incomplete rounds.
+	    
             msg.sender.transfer(_reward);
-
             emit Claim(msg.sender, _reward);
         }
     }
@@ -204,19 +196,21 @@ contract ColdStaking {
         require(staker[_addr].amount > 0);
         require(!CS_frozen);
 
-        uint _StakingInterval = now.sub(staker[_addr].time); //time interval of deposit.
-
+        uint _blocks = block.number - LastBlock;
+        uint _seconds = now - Timestamp;
+        if (_seconds > _blocks * 25) //if time goes far in the future, then use new time as 25 second * blocks.
+        {
+            _seconds = _blocks * 25;
+        }
+        uint _Timestamp = Timestamp + _seconds;
+        uint _TotalStakingWeight = TotalStakingWeight + _seconds.mul(TotalStakingAmount);
+        uint _StakingInterval = _Timestamp.sub(staker[_addr].time); //time interval of deposit.
+	
         //uint _StakerWeight = _StakingInterval.mul(staker[_addr].amount); //Staker weight.
         uint _CompleteRoundsInterval = (_StakingInterval / round_interval).mul(round_interval); //only complete rounds.
         uint _StakerWeight = _CompleteRoundsInterval.mul(staker[_addr].amount); //Weight of completed rounds.
-
-        return StakingRewardPool.mul(_StakerWeight).div(TotalStakingWeight);    //StakingRewardPool * _StakerWeight/TotalStakingWeight
-    }
-
-    function staker_info(address _addr) public constant returns (uint _amount, uint _time)
-    {
-        _amount = staker[_addr].amount;
-        _time = staker[_addr].time;
+        uint _StakingRewardPool = address(this).balance.sub(TotalStakingAmount);
+        return _StakingRewardPool.mul(_StakerWeight).div(_TotalStakingWeight);    //StakingRewardPool * _StakerWeight/TotalStakingWeight
     }
 
     modifier only_staker
