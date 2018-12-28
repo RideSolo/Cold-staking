@@ -189,7 +189,10 @@ contract ColdStaking
     
     function set_voter_withdrawal_deadline(address voter, uint _voteWithdrawalDeadline) external onlyGovernanceContract
     {
-        staker[voter].voteWithdrawalDeadline = _voteWithdrawalDeadline;
-        emit VoterWithrawlDeadlineUpdate(voter,_voteWithdrawalDeadline);
+        if(_voteWithdrawalDeadline >  staker[voter].voteWithdrawalDeadline)
+        {
+            staker[voter].voteWithdrawalDeadline = _voteWithdrawalDeadline;
+            emit VoterWithrawlDeadlineUpdate(voter,_voteWithdrawalDeadline);
+        }
     }
 }
