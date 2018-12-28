@@ -27,19 +27,22 @@ library SafeMath {
   }
 }
 
-contract ColdStaking {
+contract ColdStaking 
+{
     using SafeMath for uint;
     event Staking(address addr, uint value, uint amount, uint time);
     event WithdrawStake(address staker, uint amount);
     event Claim(address staker, uint reward);
     event DonationDeposited(address _address, uint value);
+    event VoterWithrawlDeadlineUpdate(address _voter,uint _time);
+    event InactiveStaker(address _addr,uint value);
 
     struct Staker {
         uint stake;
         uint reward;        
         uint lastClaim;
         uint lastWeightedBlockReward;
-        uint withdrawal_time;
+        uint voteWithdrawalDeadline;
     }
     
     mapping(address => Staker) public staker;
@@ -53,9 +56,16 @@ contract ColdStaking {
     
     uint public claim_delay = 27 days;
     uint public max_delay = 365 * 2 days; // 2 years.
+    
+    address public governance_contract = 0x0; // address to be added either by setter or hardcoded
 
     modifier only_staker {
         require(staker[msg.sender].stake > 0);
+        _;
+    }
+    
+    modifier onlyGovernanceContract {
+        require(msg.sender == governance_contract);
         _;
     }
     
@@ -111,17 +121,16 @@ contract ColdStaking {
     }
 
 
-    function withdraw_stake() public only_staker {
-        
-        if(staker[msg.sender].lastClaim + claim_delay > block.timestamp) {
+    function withdraw_stake() public only_staker 
+    {
+        require(staker[msg.sender].lastClaim + claim_delay < block.timestamp && staker[msg.sender].voteWithdrawalDeadline < block.timestamp );
             
-            staking_update(staker[msg.sender].stake,false);
-            staker_reward_update();
+        staking_update(staker[msg.sender].stake,false);
+        staker_reward_update();
         
-            uint _stake = staker[msg.sender].stake;
-            staker[msg.sender].stake = 0;
-            msg.sender.transfer(_stake);
-        }
+        uint _stake = staker[msg.sender].stake;
+        staker[msg.sender].stake = 0;
+        msg.sender.transfer(_stake);
         
         emit WithdrawStake(msg.sender,_stake);
     }
@@ -139,11 +148,6 @@ contract ColdStaking {
         
             emit Claim(msg.sender, _reward);
         }
-    }
-    
-    function claim_and_withdraw() public only_rewarded {
-        claim();
-        withdraw_stake();
     }
     
     function staker_info() public view returns(uint256 weight, uint256 init, uint256 actual_block,uint256 _reward)
@@ -167,10 +171,10 @@ contract ColdStaking {
         );
     }
     
-    function report_inactivity(address _addr) public only_staker
+    function report_abuse(address _addr) public only_staker
     {
         require(staker[_addr].stake > 0);
-        require(block.timestamp > staker[_addr].lastClaim.add(max_delay));
+        require(staker[_addr].lastClaim.add(max_delay) < block.timestamp);
         
         uint _amount = staker[_addr].stake;
         
@@ -179,5 +183,13 @@ contract ColdStaking {
 
         staker[_addr].stake = 0;
         _addr.transfer(_amount);
+        
+        emit InactiveStaker(_addr,_amount);
+    }
+    
+    function set_voter_withdrawal_deadline(address voter, uint _voteWithdrawalDeadline) external onlyGovernanceContract
+    {
+        staker[voter].voteWithdrawalDeadline = _voteWithdrawalDeadline;
+        emit VoterWithrawlDeadlineUpdate(voter,_voteWithdrawalDeadline);
     }
 }
