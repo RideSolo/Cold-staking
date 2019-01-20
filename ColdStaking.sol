@@ -27,6 +27,11 @@ library SafeMath {
   }
 }
 
+interface TreasuryVoting{
+    function update_voter(address _who, uint _new_weight) external;
+}
+
+
 contract ColdStaking 
 {
     using SafeMath for uint;
@@ -53,12 +58,17 @@ contract ColdStaking
     uint public weightedBlockReward;
     uint public totalClaimedReward;
     uint public lastTotalReward;
+    uint public lastBlockNumber;
     
     uint public claim_delay = 27 days;
     uint public max_delay = 365 * 2 days; // 2 years.
     
     address public governance_contract = 0x0; // address to be added either by setter or hardcoded
-
+    
+    constructor() public {
+        lastBlockNumber = block.number;
+    }
+    
     modifier only_staker {
         require(staker[msg.sender].stake > 0);
         _;
@@ -78,40 +88,63 @@ contract ColdStaking
         start_staking();
     }
     
-    // the proposal allow the staker to stake more clo, at any given time without changing the basic description of the formula 
+    // the proposal allow the staker to stake more clo, at any given time without changing the basic description of the formula however he will have to wait another 27 days to claim.
     function start_staking() public payable {
         require(msg.value > 0);
         
         staking_update(msg.value,true);
         staker_reward_update(); 
+        
         staker[msg.sender].stake = staker[msg.sender].stake.add(msg.value); 
         staker[msg.sender].lastClaim = block.timestamp;
         
+        // update TreasuryVoting contract
+        TreasuryVoting(governance_contract).update_voter(msg.sender,staker[msg.sender].stake);
+        
         emit Staking(msg.sender,msg.value,staker[msg.sender].stake,block.timestamp);
     }
-
+    
+    
 
     function staking_update(uint _value, bool _sign) internal {
     
-        // Computing the total block reward (20% of the mining reward) that have been 
+        // Computing the total block reward (20% of the mining reward) that have been sent
         // to the contract since the last call of staking_update.
         // the smart contract now is independent from any change of the monetary policy.
-        // As highlighted by yuriy77k, msg.value should be also deducted from the total.
         
         uint _total_sub_ = staked_amount.add(msg.value);
         uint _total_add_ = totalClaimedReward;
         
         uint newTotalReward = address(this).balance.add(_total_add_).sub(_total_sub_);
         uint intervalReward = newTotalReward - lastTotalReward;
+        
         lastTotalReward = lastTotalReward + intervalReward;
         
-        if (staked_amount!=0) weightedBlockReward = weightedBlockReward.add(intervalReward.mul(1 ether).div(staked_amount));
-        else rewardToRedistribute = rewardToRedistribute.add(intervalReward);
-        
+        if (staked_amount!=0) {
+            weightedBlockReward = weightedBlockReward.add(intervalReward.add(redistributed_reward()).mul(1 ether).div(staked_amount));
+        } else {
+            rewardToRedistribute = rewardToRedistribute.add(intervalReward).add(redistributed_reward());
+        }
         if(_sign ) staked_amount = staked_amount.add(_value);
         else staked_amount = staked_amount.sub(_value);
     }
     
+    
+    // calculate the redistributed reward ( the unlcaimed stakers reward that were reported + the donation ), only partialy vested 100 CLO for every block.
+    function redistributed_reward() internal returns(uint) {
+        // the redistributed reward per block is set to 100 but can be changed.
+        uint _amount = (block.number -lastBlockNumber) * 100;
+        if (_amount > rewardToRedistribute) {
+            _amount =  rewardToRedistribute;
+            rewardToRedistribute = 0;
+        } else {
+            rewardToRedistribute = rewardToRedistribute.sub(_amount); 
+        }
+        lastBlockNumber = block.number;
+        return _amount;
+    }
+    
+    // update the reward for the msg.sender
     function staker_reward_update() internal {
         uint stakerIntervalWeightedBlockReward = weightedBlockReward.sub(staker[msg.sender].lastWeightedBlockReward);
         uint _reward = staker[msg.sender].stake.mul(stakerIntervalWeightedBlockReward).div(1 ether);
@@ -120,7 +153,7 @@ contract ColdStaking
         staker[msg.sender].lastWeightedBlockReward = weightedBlockReward;
     }
 
-
+    // withdraw stake and claim the reward
     function withdraw_stake() public only_staker 
     {
         require(staker[msg.sender].lastClaim + claim_delay < block.timestamp && staker[msg.sender].voteWithdrawalDeadline < block.timestamp );
@@ -130,11 +163,20 @@ contract ColdStaking
         
         uint _stake = staker[msg.sender].stake;
         staker[msg.sender].stake = 0;
-        msg.sender.transfer(_stake);
+        
+        uint _reward = staker[msg.sender].reward;
+        staker[msg.sender].reward = 0;
+        
+        staker[msg.sender].lastClaim = block.timestamp;
+        msg.sender.transfer(_stake.add(_reward));
+        
+        // update TreasuryVoting contract
+        TreasuryVoting(governance_contract).update_voter(msg.sender,staker[msg.sender].stake);
         
         emit WithdrawStake(msg.sender,_stake);
     }
 
+    // reward claim
     function claim() public only_rewarded {
         if(staker[msg.sender].lastClaim + claim_delay <= block.timestamp) {
             
@@ -176,23 +218,35 @@ contract ColdStaking
         require(staker[_addr].stake > 0);
         require(staker[_addr].lastClaim.add(max_delay) < block.timestamp);
         
-        uint _amount = staker[_addr].stake;
+        staking_update(staker[_addr].stake,false);
+        staker_reward_update();
         
-        staked_amount = staked_amount.sub(_amount);
-        rewardToRedistribute = rewardToRedistribute.add(_amount);
-
+        rewardToRedistribute = rewardToRedistribute.add(staker[_addr].reward);
+        staker[_addr].reward = 0;
+        
+        uint _stake = staker[_addr].stake; 
         staker[_addr].stake = 0;
-        _addr.transfer(_amount);
+        _addr.transfer(_stake);
         
-        emit InactiveStaker(_addr,_amount);
+        // update TreasuryVoting contract
+        TreasuryVoting(governance_contract).update_voter(msg.sender,staker[msg.sender].stake);
+        
+        emit InactiveStaker(_addr,_stake);
     }
     
-    function set_voter_withdrawal_deadline(address voter, uint _voteWithdrawalDeadline) external onlyGovernanceContract
+    function vote_casted(address voter, uint _voteWithdrawalDeadline) external onlyGovernanceContract
     {
+        // voteWithdrawalDeadline is the deadline of the proposal from which the voter can withdraw his stake once the deadline reached.
         if(_voteWithdrawalDeadline >  staker[voter].voteWithdrawalDeadline)
         {
             staker[voter].voteWithdrawalDeadline = _voteWithdrawalDeadline;
             emit VoterWithrawlDeadlineUpdate(voter,_voteWithdrawalDeadline);
         }
+    }
+    
+    function DEBUG_donation() public payable 
+    {
+        emit DonationDeposited(msg.sender, msg.value);
+        rewardToRedistribute = rewardToRedistribute.add(msg.value);
     }
 }
