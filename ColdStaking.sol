@@ -29,6 +29,8 @@ library SafeMath {
 
 interface TreasuryVoting{
     function update_voter(address _who, uint _new_weight) external;
+    
+    function is_voter(address _who) public constant returns (bool);
 }
 
 
@@ -99,7 +101,11 @@ contract ColdStaking
         staker[msg.sender].lastClaim = block.timestamp;
         
         // update TreasuryVoting contract
-        TreasuryVoting(governance_contract).update_voter(msg.sender,staker[msg.sender].stake);
+        // EDIT: not every Staker is Voter
+        if( TreasuryVoting(governance_contract).is_voter(msg.sender) )
+        {
+            TreasuryVoting(governance_contract).update_voter(msg.sender,staker[msg.sender].stake);
+        }
         
         emit Staking(msg.sender,msg.value,staker[msg.sender].stake,block.timestamp);
     }
@@ -171,7 +177,11 @@ contract ColdStaking
         msg.sender.transfer(_stake.add(_reward));
         
         // update TreasuryVoting contract
-        TreasuryVoting(governance_contract).update_voter(msg.sender,staker[msg.sender].stake);
+        // EDIT: not every Staker is Voter
+        if( TreasuryVoting(governance_contract).is_voter(msg.sender) )
+        {
+            TreasuryVoting(governance_contract).update_voter(msg.sender,staker[msg.sender].stake);
+        }
         
         emit WithdrawStake(msg.sender,_stake);
     }
@@ -229,7 +239,10 @@ contract ColdStaking
         _addr.transfer(_stake);
         
         // update TreasuryVoting contract
-        TreasuryVoting(governance_contract).update_voter(msg.sender,staker[msg.sender].stake);
+        if( TreasuryVoting(governance_contract).is_voter(msg.sender) )
+        {
+            TreasuryVoting(governance_contract).update_voter(msg.sender,staker[msg.sender].stake);
+        }
         
         emit InactiveStaker(_addr,_stake);
     }
